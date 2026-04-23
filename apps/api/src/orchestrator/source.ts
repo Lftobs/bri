@@ -1,0 +1,73 @@
+import { mkdir, rm, readdir } from 'node:fs/promises';
+import { dirname, join, relative } from 'node:path';
+import { spawn } from 'node:child_process';
+import { config } from '../utils/config';
+
+const ensureSingleRoot = async (root: string): Promise<string> => {
+  const entries = await readdir(root, { withFileTypes: true });
+  if (entries.length === 1 && entries[0].isDirectory()) {
+    return join(root, entries[0].name);
+  }
+  return root;
+};
+
+const run = (cmd: string, args: string[], cwd?: string) =>
+  new Promise<void>((resolve, reject) => {
+    const child = spawn(cmd, args, {
+      cwd,
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    let stderr = '';
+    child.stderr.on('data', (chunk) => {
+      stderr += String(chunk);
+    });
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`${cmd} exited with code ${code}: ${stderr}`));
+      }
+    });
+  });
+
+export const prepareSourceWorkspace = async (deploymentId: string, gitUrl: string) => {
+  const root = join(config.workspaceRoot, deploymentId);
+  await rm(root, { recursive: true, force: true });
+  await mkdir(root, { recursive: true });
+  await run('git', ['clone', '--depth', '1', gitUrl, root]);
+  return root;
+};
+
+export const prepareUploadWorkspace = async (deploymentId: string, archivePath: string) => {
+  const root = join(config.workspaceRoot, deploymentId);
+  await rm(root, { recursive: true, force: true });
+  await mkdir(root, { recursive: true });
+
+  if (archivePath.endsWith('.zip')) {
+    await run('unzip', ['-q', archivePath, '-d', root]);
+    return ensureSingleRoot(root);
+  }
+
+  if (
+    archivePath.endsWith('.tar') ||
+    archivePath.endsWith('.tar.gz') ||
+    archivePath.endsWith('.tgz')
+  ) {
+    await run('tar', ['-xf', archivePath, '-C', root]);
+    return ensureSingleRoot(root);
+  }
+
+  throw new Error('Unsupported archive format. Use .zip, .tar, .tar.gz, or .tgz');
+};
+
+export const cleanupWorkspace = async (workspacePath: string) => {
+  await rm(workspacePath, { recursive: true, force: true });
+
+  const parent = dirname(workspacePath);
+  const rel = relative(config.workspaceRoot, parent);
+  if (rel && !rel.startsWith('..') && !rel.includes('/')) {
+    await rm(parent, { recursive: true, force: true });
+  }
+};
