@@ -34,6 +34,7 @@ export const apiRoutes = new Elysia({ prefix: '/api' })
 
     const form = await request.formData();
     const sourceType = String(form.get('sourceType') ?? '');
+    const projectId = String(form.get('projectId') ?? '').trim() || undefined;
 
     if (sourceType !== 'git' && sourceType !== 'upload') {
       set.status = 400;
@@ -48,6 +49,7 @@ export const apiRoutes = new Elysia({ prefix: '/api' })
       }
 
       const deployment = await createDeployment({
+        projectId,
         sourceType: 'git',
         sourceRef: gitUrl
       });
@@ -71,8 +73,30 @@ export const apiRoutes = new Elysia({ prefix: '/api' })
     await writeFile(uploadPath, bytes);
 
     const deployment = await createDeployment({
+      projectId,
       sourceType: 'upload',
       sourceRef: uploadPath
+    });
+
+    orchestrator.enqueue(deployment.id);
+    return deployment;
+  })
+  .post('/deployments/:id/rollback', async ({ params, set }) => {
+    const original = await getDeploymentById(params.id);
+    if (!original) {
+      set.status = 404;
+      return { error: 'Deployment not found' };
+    }
+
+    if (!original.imageTag) {
+      set.status = 400;
+      return { error: 'Deployment has no built image to rollback to' };
+    }
+
+    const deployment = await createDeployment({
+      projectId: original.projectId || undefined,
+      sourceType: 'image',
+      sourceRef: original.imageTag
     });
 
     orchestrator.enqueue(deployment.id);

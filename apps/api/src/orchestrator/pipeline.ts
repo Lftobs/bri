@@ -82,26 +82,52 @@ export class PipelineOrchestrator {
     try {
       await emitLog(deploymentId, 'system', 'Deployment enqueued');
 
-      await updateDeploymentStatus(deploymentId, 'building', { failureReason: null });
-      await emitLog(deploymentId, 'build', `Preparing source (${deployment.sourceType})`);
+      const imageTag = deployment.sourceType === 'image'
+        ? deployment.sourceRef
+        : `brim-${deploymentId}:latest`;
 
-      if (deployment.sourceType === 'git') {
-        workspacePath = await prepareSourceWorkspace(deploymentId, deployment.sourceRef);
+      if (deployment.sourceType !== 'image') {
+        await updateDeploymentStatus(deploymentId, 'building', { failureReason: null });
+        if (deployment.sourceType === 'git') {
+          await emitLog(deploymentId, 'build', `Cloning git repository: ${deployment.sourceRef}`);
+          workspacePath = await prepareSourceWorkspace(deploymentId, deployment.sourceRef);
+        } else {
+          await emitLog(deploymentId, 'build', `Extracting archive: ${deployment.sourceRef}`);
+          uploadedArchivePath = deployment.sourceRef;
+          workspacePath = await prepareUploadWorkspace(deploymentId, deployment.sourceRef);
+        }
+        await emitLog(deploymentId, 'build', `Source prepared at: ${workspacePath}`);
+
+        const cacheKey = deployment.projectId || deploymentId;
+        await buildWithRailpack(workspacePath, imageTag, async (line) => {
+          await emitLog(deploymentId, 'build', line);
+        }, { cacheKey });
       } else {
-        uploadedArchivePath = deployment.sourceRef;
-        workspacePath = await prepareUploadWorkspace(deploymentId, deployment.sourceRef);
+        await emitLog(deploymentId, 'build', `Rolling back to existing image: ${imageTag}`);
       }
-
-      const imageTag = `brim-${deploymentId}:latest`;
-      await buildWithRailpack(workspacePath, imageTag, async (line) => {
-        await emitLog(deploymentId, 'build', line);
-      });
 
       await updateDeploymentStatus(deploymentId, 'deploying', { imageTag });
       await emitLog(deploymentId, 'deploy', 'Starting container deployment');
 
+      let oldContainerName: string | undefined;
+      if (deployment.projectId) {
+        const all = await listDeployments();
+        const prev = all.find(d =>
+          d.projectId === deployment.projectId &&
+          d.status === 'running' &&
+          d.id !== deploymentId
+        );
+        if (prev?.containerName) {
+          oldContainerName = prev.containerName;
+          await emitLog(deploymentId, 'deploy', `Found existing deployment ${prev.id} (${oldContainerName}) for zero-downtime swap`);
+        }
+      }
+
       const runtime = await deployContainer(deploymentId, imageTag, async (line) => {
         await emitLog(deploymentId, 'deploy', line);
+      }, {
+        projectId: deployment.projectId || undefined,
+        oldContainerName
       });
 
       await updateDeploymentStatus(deploymentId, 'running', {
@@ -110,10 +136,22 @@ export class PipelineOrchestrator {
         liveUrl: runtime.liveUrl,
         failureReason: null
       });
+
+      if (oldContainerName && deployment.projectId) {
+        const all = await listDeployments();
+        const prev = all.find(d => d.containerName === oldContainerName && d.id !== deploymentId);
+        if (prev) {
+          await updateDeploymentStatus(prev.id, 'inactive', { failureReason: 'Superseded by new deployment' });
+          await emitLog(prev.id, 'system', `Deployment marked inactive (superseded by ${deploymentId})`);
+        }
+      }
+
       await emitLog(deploymentId, 'system', 'Deployment is running');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown deployment failure';
-      await emitLog(deploymentId, 'system', `Deployment failed: ${message}`);
+      console.error(`[Orchestrator] Deployment ${deploymentId} failed:`, error);
+
+      await emitLog(deploymentId, 'system', `CRITICAL FAILURE: ${message}`);
       await updateDeploymentStatus(deploymentId, 'failed', {
         failureReason: message
       });

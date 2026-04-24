@@ -5,6 +5,7 @@ export const migrate = async () => {
   db.exec(`
     CREATE TABLE IF NOT EXISTS deployments (
       id TEXT PRIMARY KEY,
+      project_id TEXT,
       source_type TEXT NOT NULL,
       source_ref TEXT NOT NULL,
       status TEXT NOT NULL,
@@ -30,4 +31,9 @@ export const migrate = async () => {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_logs_dep_seq
       ON deployment_logs(deployment_id, sequence);
   `);
+
+  try {
+    db.exec('ALTER TABLE deployments ADD COLUMN project_id TEXT;');
+  } catch (e) {
+  }
 };

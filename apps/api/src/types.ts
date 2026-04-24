@@ -3,12 +3,14 @@ export type DeploymentStatus =
   | 'building'
   | 'deploying'
   | 'running'
-  | 'failed';
+  | 'failed'
+  | 'inactive';
 
-export type SourceType = 'git' | 'upload';
+export type SourceType = 'git' | 'upload' | 'image';
 
 export interface Deployment {
   id: string;
+  projectId: string | null;
   sourceType: SourceType;
   sourceRef: string;
   status: DeploymentStatus;
@@ -31,6 +33,7 @@ export interface DeploymentLog {
 }
 
 export interface CreateDeploymentInput {
+  projectId?: string;
   sourceType: SourceType;
   sourceRef: string;
 }

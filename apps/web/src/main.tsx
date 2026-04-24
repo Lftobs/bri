@@ -21,11 +21,13 @@ type DeploymentStatus =
 	| "building"
 	| "deploying"
 	| "running"
-	| "failed";
+	| "failed"
+	| "inactive";
 
 type Deployment = {
 	id: string;
-	sourceType: "git" | "upload";
+	projectId: string | null;
+	sourceType: "git" | "upload" | "image";
 	sourceRef: string;
 	status: DeploymentStatus;
 	imageTag: string | null;
@@ -90,6 +92,16 @@ const api = {
 			throw new Error(
 				"Failed to fetch logs",
 			);
+		}
+		return res.json();
+	},
+	rollback: async (id: string): Promise<Deployment> => {
+		const res = await fetch(`/api/deployments/${id}/rollback`, {
+			method: "POST",
+		});
+		if (!res.ok) {
+			const body = await res.json().catch(() => ({}));
+			throw new Error(body.error ?? "Rollback failed");
 		}
 		return res.json();
 	},
@@ -177,6 +189,7 @@ const statusColor: Record<
 	deploying: "#9c6f00",
 	running: "#1a7f37",
 	failed: "#b42318",
+	inactive: "#8b8b8b",
 };
 
 function AppPage() {
@@ -184,6 +197,8 @@ function AppPage() {
 	const [sourceType, setSourceType] =
 		React.useState<"git" | "upload">("git");
 	const [gitUrl, setGitUrl] =
+		React.useState("");
+	const [projectId, setProjectId] =
 		React.useState("");
 	const [archive, setArchive] =
 		React.useState<File | null>(null);
@@ -212,6 +227,19 @@ function AppPage() {
 				queryKey: ["deployments"],
 			});
 			setSelectedDeploymentId(created.id);
+			setGitUrl("");
+			setProjectId("");
+			setArchive(null);
+		},
+	});
+
+	const rollbackMutation = useMutation({
+		mutationFn: api.rollback,
+		onSuccess: (created) => {
+			queryClient.invalidateQueries({
+				queryKey: ["deployments"],
+			});
+			setSelectedDeploymentId(created.id);
 		},
 	});
 
@@ -225,6 +253,9 @@ function AppPage() {
 		event.preventDefault();
 		const form = new FormData();
 		form.append("sourceType", sourceType);
+		if (projectId) {
+			form.append("projectId", projectId);
+		}
 
 		if (sourceType === "git") {
 			form.append("gitUrl", gitUrl);
@@ -308,6 +339,22 @@ function AppPage() {
 						</label>
 					)}
 
+					<label>
+						Project ID (Slug)
+						<input
+							type="text"
+							value={projectId}
+							onChange={(e) =>
+								setProjectId(
+									e.target
+										.value,
+								)
+							}
+							placeholder="e.g. my-awesome-app"
+						/>
+						<span className="hint">Optional. Enables stable URLs and zero-downtime redeploys.</span>
+					</label>
+
 					<button
 						type="submit"
 						disabled={
@@ -336,9 +383,10 @@ function AppPage() {
 						<thead>
 							<tr>
 								<th>ID</th>
+								<th>Project</th>
 								<th>Status</th>
-								<th>Image tag</th>
 								<th>Live URL</th>
+								<th>Actions</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -367,6 +415,11 @@ function AppPage() {
 										)}
 									</td>
 									<td>
+										{dep.projectId ?? (
+											<span style={{ opacity: 0.5 }}>-</span>
+										)}
+									</td>
+									<td>
 										<span
 											style={{
 												color: statusColor[
@@ -382,10 +435,6 @@ function AppPage() {
 										</span>
 									</td>
 									<td>
-										{dep.imageTag ??
-											"-"}
-									</td>
-									<td>
 										{dep.liveUrl ? (
 											<a
 												href={
@@ -393,12 +442,25 @@ function AppPage() {
 												}
 												target="_blank"
 												rel="noreferrer"
+												onClick={(e) => e.stopPropagation()}
 											>
-												open
+												{dep.projectId ? `${dep.projectId}.localhost` : "open"}
 											</a>
 										) : (
 											"-"
 										)}
+									</td>
+									<td>
+										<button
+											className="btn-small"
+											disabled={!dep.imageTag || rollbackMutation.isPending}
+											onClick={(e) => {
+												e.stopPropagation();
+												rollbackMutation.mutate(dep.id);
+											}}
+										>
+											Rollback
+										</button>
 									</td>
 								</tr>
 							))}

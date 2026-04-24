@@ -4,6 +4,7 @@ import type { CreateDeploymentInput, Deployment, DeploymentLog, DeploymentStatus
 
 const mapDeployment = (row: any): Deployment => ({
   id: row.id,
+  projectId: row.project_id,
   sourceType: row.source_type,
   sourceRef: row.source_ref,
   status: row.status,
@@ -26,9 +27,9 @@ export const createDeployment = async (input: CreateDeploymentInput): Promise<De
 
   db.query(
     `INSERT INTO deployments
-      (id, source_type, source_ref, status, route_path, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(id, input.sourceType, input.sourceRef, 'pending', routePath, timestamp, timestamp);
+      (id, project_id, source_type, source_ref, status, route_path, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(id, input.projectId ?? null, input.sourceType, input.sourceRef, 'pending', routePath, timestamp, timestamp);
 
   const created = db.query('SELECT * FROM deployments WHERE id = ?').get(id);
   return mapDeployment(created);

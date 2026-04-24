@@ -108,6 +108,29 @@ tr.selected {
   margin: 0;
 }
 
+.hint {
+  font-size: 11px;
+  color: #728197;
+  margin-top: -2px;
+}
+
+.btn-small {
+  padding: 4px 8px;
+  font-size: 12px;
+  background: #f0f4f9;
+  color: #1d3356;
+  border: 1px solid #d5dfef;
+}
+
+.btn-small:hover {
+  background: #e1e9f4;
+}
+
+.btn-small:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 @media (max-width: 700px) {
   .layout {
     padding: 12px;

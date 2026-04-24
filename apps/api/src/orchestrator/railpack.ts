@@ -171,6 +171,7 @@ export const buildWithRailpack = async (
 	workspace: string,
 	imageTag: string,
 	onLog: (line: string) => Promise<void>,
+	opts?: { cacheKey?: string },
 ): Promise<RailpackBuildResult> => {
 	await onLog(
 		`Starting Railpack CLI build for image: ${imageTag}`,
@@ -179,9 +180,14 @@ export const buildWithRailpack = async (
 	// Ensure builder exists (persists across builds)
 	await ensureBuilder();
 
-	const cacheKey = imageTag
-		.split(":")[0]
-		.replace(/[^a-zA-Z0-9_-]/g, "-");
+	const cacheKey =
+		opts?.cacheKey ??
+		imageTag
+			.split(":")[0]
+			.replace(/[^a-zA-Z0-9_-]/g, "-")
+			.split("-")
+			.slice(0, 2)
+			.join("-"); // Fallback to 'brim-default' or similar if imageTag starts with 'brim-'
 
 	const build = await spawnAsync(
 		"railpack",
