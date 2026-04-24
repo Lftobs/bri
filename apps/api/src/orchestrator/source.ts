@@ -5,8 +5,10 @@ import { config } from '../utils/config';
 
 const ensureSingleRoot = async (root: string): Promise<string> => {
   const entries = await readdir(root, { withFileTypes: true });
-  if (entries.length === 1 && entries[0].isDirectory()) {
-    return join(root, entries[0].name);
+  const valid = entries.filter((e) => !e.name.startsWith('.') && e.name !== '__MACOSX');
+
+  if (valid.length === 1 && valid[0].isDirectory()) {
+    return join(root, valid[0].name);
   }
   return root;
 };

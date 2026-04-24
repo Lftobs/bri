@@ -2,12 +2,14 @@
   auto_https off
 }
 
+import /etc/caddy/routes/*.caddy
+
 :80 {
+  encode zstd gzip
+
   handle /api/* {
     reverse_proxy api:3001
   }
-
-  import /etc/caddy/routes/*.caddy
 
   handle {
     reverse_proxy web:3000

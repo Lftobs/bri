@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises';
+import { unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { config } from '../utils/config';
@@ -23,7 +23,8 @@ const run = (cmd: string, args: string[]) =>
 
     child.on('close', (code) => {
       if (code === 0) {
-        resolve(stdout.trim());
+        const out = (stdout + '\n' + stderr).trim();
+        resolve(out);
       } else {
         reject(new Error(`${cmd} ${args.join(' ')} failed (${code}): ${stderr}`));
       }
@@ -55,7 +56,7 @@ const tryRun = async (cmd: string, args: string[]) => {
   }
 };
 
-const waitForRunningContainer = async (containerName: string, retries = 20) => {
+const waitForRunningContainer = async (containerName: string, retries: number, onLog: (line: string) => Promise<void>) => {
   for (let attempt = 0; attempt < retries; attempt += 1) {
     try {
       const status = await run(dockerBin, [
@@ -64,17 +65,68 @@ const waitForRunningContainer = async (containerName: string, retries = 20) => {
         '{{.State.Status}}',
         containerName
       ]);
-      if (status.trim() === 'running') {
+      const trimmed = status.trim();
+      if (trimmed === 'running') {
+        // Simple stability wait to ensure it doesn't crash 1 second later
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        
+        // Re-check after 2 seconds
+        const stabilityStatus = await run(dockerBin, ['inspect', '-f', '{{.State.Status}}', containerName]);
+        if (stabilityStatus.trim() !== 'running') {
+          const logs = await run(dockerBin, ['logs', '--tail', '50', containerName]).catch(() => 'no logs available');
+          throw new Error(`Container crashed shortly after starting. Logs:\n${logs}`);
+        }
         return;
       }
-    } catch {
+      if (trimmed === 'exited') {
+        let logs = await run(dockerBin, ['logs', '--tail', '50', containerName]).catch(() => 'no logs available');
+        logs = logs.trim() || '*No logs produced by container*';
+        throw new Error(`Container ${containerName} exited immediately. Logs:\n${logs}`);
+      }
+      if (trimmed === 'created') {
+        await onLog(`Container ${containerName} still initializing...`);
+      }
+    } catch (e: any) {
+      if (e.message && e.message.includes('exited immediately')) {
+        throw e;
+      }
+      if (e.message && e.message.includes('Container crashed')) {
+        throw e;
+      }
       // ignore transient inspect errors during container startup
     }
 
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
 
-  throw new Error(`Container ${containerName} did not reach running state in time`);
+  await onLog(`Container ${containerName} did not reach running state — attempting docker start`);
+  try {
+    await run(dockerBin, ['start', containerName]);
+    await onLog(`docker start ${containerName} completed — proceeding with deployment`);
+  } catch (startError) {
+    await onLog(`docker start failed: ${String(startError)} — proceeding anyway`);
+  }
+
+  await onLog(`Connecting container to ${config.dockerNetwork}`);
+  await tryRun(dockerBin, ['network', 'connect', config.dockerNetwork, containerName]);
+};
+
+export const ensureContainerRunning = async (containerName: string) => {
+  try {
+    const status = await run(dockerBin, ['inspect', '-f', '{{.State.Status}}', containerName]);
+    if (status.trim() !== 'running') {
+      await run(dockerBin, ['start', containerName]);
+    }
+    // ensure network is connected
+    await tryRun(dockerBin, ['network', 'connect', config.dockerNetwork, containerName]);
+  } catch (error) {
+    console.error(`Failed to reconcile container ${containerName}:`, error);
+  }
+};
+
+export const reloadCaddy = async () => {
+  const caddyContainer = await getCaddyContainer();
+  await run(dockerBin, ['exec', caddyContainer, 'caddy', 'reload', '--config', '/etc/caddy/Caddyfile']);
 };
 
 export const deployContainer = async (
@@ -84,7 +136,7 @@ export const deployContainer = async (
 ) => {
   const containerName = `deploy-${deploymentId}`;
   const routePath = `/apps/${deploymentId}`;
-  const liveUrl = `${config.caddyIngressBase}${routePath}/`;
+  const liveUrl = `http://${deploymentId}.localhost`;
 
   await onLog(`Removing old container if present: ${containerName}`);
   await tryRun(dockerBin, ['rm', '-f', containerName]);
@@ -103,12 +155,13 @@ export const deployContainer = async (
   ]);
 
   await onLog(`Waiting for container ${containerName} to report running`);
-  await waitForRunningContainer(containerName);
+  await waitForRunningContainer(containerName, 40, onLog);
+
+  await onLog(`Connecting container to ${config.dockerNetwork}`);
+  await tryRun(dockerBin, ['network', 'connect', config.dockerNetwork, containerName]);
 
   const caddyRouteFile = join(config.caddyRoutesDir, `${deploymentId}.caddy`);
-  const caddySnippet = `redir ${routePath} ${routePath}/
-${routePath}/* {
-  uri strip_prefix ${routePath}
+  const caddySnippet = `${deploymentId}.localhost:80 {
   reverse_proxy ${containerName}:${config.appInternalPort}
 }
 `;
@@ -117,8 +170,13 @@ ${routePath}/* {
   await writeFile(caddyRouteFile, caddySnippet, 'utf8');
 
   await onLog('Reloading Caddy to apply dynamic route');
-  const caddyContainer = await getCaddyContainer();
-  await run(dockerBin, ['exec', caddyContainer, 'caddy', 'reload', '--config', '/etc/caddy/Caddyfile']);
+  try {
+    await reloadCaddy();
+  } catch (error) {
+    await unlink(caddyRouteFile).catch(() => {});
+    await reloadCaddy().catch(() => {});
+    throw error;
+  }
   await onLog('Caddy route reload completed');
 
   await onLog(`Deployment reachable at ${liveUrl}`);

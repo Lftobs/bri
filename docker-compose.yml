@@ -1,75 +1,122 @@
 services:
-  buildkit:
-    image: moby/buildkit:latest
-    command: ["--addr", "tcp://0.0.0.0:1234", "--root", "/var/lib/buildkit"]
-    privileged: true
-    volumes:
-      - buildkit-data:/var/lib/buildkit
-    networks:
-      brim:
-        aliases:
-          - buildkit
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "tcp://localhost:1234"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-      start_period: 5s
+    buildkit:
+        image: moby/buildkit:latest
+        command:
+            [
+                "--addr",
+                "tcp://0.0.0.0:1234",
+                "--root",
+                "/var/lib/buildkit",
+            ]
+        privileged: true
+        volumes:
+            - buildkit-data:/var/lib/buildkit
+        networks:
+            brim:
+                aliases:
+                    - buildkit
+        healthcheck:
+            test:
+                [
+                    "CMD",
+                    "wget",
+                    "--spider",
+                    "-q",
+                    "tcp://localhost:1234",
+                ]
+            interval: 5s
+            timeout: 3s
+            retries: 5
+            start_period: 5s
 
-  api:
-    build:
-      context: ./apps/api
-    environment:
-      PORT: 3001
-      DATABASE_PATH: /app/data/brim.db
-      WORKSPACE_ROOT: /app/workspace
-      CADDY_ROUTES_DIR: /caddy/routes
-      CADDY_INGRESS_BASE: http://localhost
-      DOCKER_NETWORK: brim_net
-      APP_INTERNAL_PORT: 3000
-      BUILDKIT_HOST: tcp://buildkit:1234
-      DOCKER_BIN: /usr/bin/docker
-      RAILPACK_VERBOSE: "1"
-      RAILPACK_BUILD_TIMEOUT_MS: "0"
-      RAILPACK_BUILD_EXPORT_MODE: oci
-    volumes:
-      - ./data:/app/data
-      - ./workspace:/app/workspace
-      - ./infra/caddy/routes:/caddy/routes
-      - /var/run/docker.sock:/var/run/docker.sock
-    depends_on:
-      buildkit:
-        condition: service_started
-    networks:
-      brim:
-        aliases:
-          - api
+    api:
+        build:
+            context: ./apps/api
+        environment:
+            PORT: 3001
+            DATABASE_PATH: /app/data/brim.db
+            WORKSPACE_ROOT: /app/workspace
+            CADDY_ROUTES_DIR: /caddy/routes
+            CADDY_INGRESS_BASE: http://localhost
+            DOCKER_NETWORK: brim_net
+            APP_INTERNAL_PORT: 3000
+            BUILDKIT_HOST: tcp://buildkit:1234
+            DOCKER_BIN: /usr/bin/docker
+            RAILPACK_VERBOSE: "1"
+            RAILPACK_BUILD_TIMEOUT_MS: "600000"
+        volumes:
+            - ./data:/app/data
+            - ./workspace:/app/workspace
+            - ./infra/caddy/routes:/caddy/routes
+            - /var/run/docker.sock:/var/run/docker.sock
+        depends_on:
+            buildkit:
+                condition: service_started
+        healthcheck:
+            test:
+                [
+                    "CMD",
+                    "curl",
+                    "-fsS",
+                    "http://localhost:3001/api/health",
+                ]
+            interval: 50s
+            timeout: 3s
+            retries: 100
+            start_period: 10s
+        networks:
+            brim:
+                aliases:
+                    - api
 
-  web:
-    build:
-      context: ./apps/web
-    networks:
-      brim:
-        aliases:
-          - web
+    web:
+        build:
+            context: ./apps/web
+        healthcheck:
+            test:
+                [
+                    "CMD",
+                    "bun",
+                    "-e",
+                    "fetch('http://localhost:3000/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+                ]
+            interval: 5s
+            timeout: 3s
+            retries: 10
+            start_period: 10s
+        networks:
+            brim:
+                aliases:
+                    - web
 
-  caddy:
-    image: caddy:2.8-alpine
-    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile", "--watch"]
-    ports:
-      - "80:80"
-    volumes:
-      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./infra/caddy/routes:/etc/caddy/routes
-    depends_on:
-      - api
-      - web
-    networks:
-      brim:
+    caddy:
+        image: caddy:2.8-alpine
+        command:
+            [
+                "caddy",
+                "run",
+                "--config",
+                "/etc/caddy/Caddyfile",
+                "--adapter",
+                "caddyfile",
+                "--watch",
+            ]
+        ports:
+            - "80:80"
+        volumes:
+            - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+            - ./infra/caddy/routes:/etc/caddy/routes
+        depends_on:
+            api:
+                condition: service_healthy
+            web:
+                condition: service_healthy
+        networks:
+            brim:
 
 networks:
-  brim:
-    name: brim_net
+    brim:
+        name: brim_net
 
 volumes:
-  buildkit-data:
+    buildkit-data:

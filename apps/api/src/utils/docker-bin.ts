@@ -40,7 +40,7 @@ export const resolveDockerBin = (): string => {
     }
   }
 
-  throw new Error('Docker CLI binary not found or not executable in api container');
+  return process.env.DOCKER_BIN || 'docker';
 };
 
 export const dockerBin = resolveDockerBin();

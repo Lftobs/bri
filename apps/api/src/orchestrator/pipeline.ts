@@ -1,22 +1,25 @@
 import { rm } from 'node:fs/promises';
-import { appendLog, getDeploymentById, updateDeploymentStatus } from '../db/repo';
+import { appendLog, getDeploymentById, listDeployments, updateDeploymentStatus } from '../db/repo';
 import { logBus } from './log-bus';
 import { buildWithRailpack } from './railpack';
 import { prepareSourceWorkspace, prepareUploadWorkspace, cleanupWorkspace } from './source';
-import { deployContainer } from './runtime';
+import { deployContainer, ensureContainerRunning, reloadCaddy } from './runtime';
+
+const now = () => new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
 
 const emitLog = async (
   deploymentId: string,
   stage: 'build' | 'deploy' | 'system',
   message: string
 ) => {
+  const timestamp = now();
   const saved = await appendLog(deploymentId, stage, message);
   logBus.publish({
     deploymentId,
     sequence: saved.sequence,
     stage,
     message,
-    timestamp: saved.createdAt
+    timestamp
   });
 };
 
@@ -29,6 +32,26 @@ export class PipelineOrchestrator {
     this.drain().catch((error) => {
       console.error('Queue drain failed', error);
     });
+  }
+
+  async reconcileState() {
+    console.log('Reconciling deployment state...');
+    const deployments = await listDeployments();
+    const running = deployments.filter((d) => d.status === 'running');
+
+    for (const deployment of running) {
+      if (deployment.containerName) {
+        console.log(`Ensuring container ${deployment.containerName} is running`);
+        await ensureContainerRunning(deployment.containerName);
+      }
+    }
+
+    try {
+      await reloadCaddy();
+      console.log('Caddy reloaded during reconciliation');
+    } catch (error) {
+      console.log('Caddy not ready for reload during reconciliation. It will pick up routes automatically when it boots.');
+    }
   }
 
   private async drain() {

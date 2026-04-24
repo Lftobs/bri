@@ -93,10 +93,14 @@ tr.selected {
 .log-line {
   padding: 2px 0;
   white-space: pre-wrap;
+  display: flex;
+  gap: 8px;
 }
 
 .meta {
   color: #a9bdde;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .error {
