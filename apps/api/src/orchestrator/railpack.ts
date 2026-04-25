@@ -64,11 +64,16 @@ const spawnAsync = (
 						opts.onTimeout?.();
 						child.kill("SIGTERM");
 						setTimeout(() => {
-							if (!settled)
-								child.kill(
-									"SIGKILL",
-								);
-						}, 10000);
+							if (!settled) {
+								child.kill("SIGKILL");
+							}
+						}, 5000);
+						finish(
+							undefined,
+							new Error(
+								`${cmd} timed out after ${opts.timeoutMs}ms`,
+							),
+						);
 					}, opts.timeoutMs)
 				: null;
 

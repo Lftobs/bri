@@ -113,6 +113,8 @@ function useDeploymentLogs(
 	const [liveLogs, setLiveLogs] =
 		React.useState<Log[]>([]);
 
+	const queryClient = useQueryClient();
+
 	const history = useQuery({
 		queryKey: ["logs", deploymentId],
 		queryFn: () =>
@@ -127,6 +129,8 @@ function useDeploymentLogs(
 		if (!deploymentId) {
 			return;
 		}
+
+		queryClient.invalidateQueries({ queryKey: ["logs", deploymentId] });
 
 		const stream = new EventSource(
 			`/api/deployments/${deploymentId}/logs/stream`,
@@ -243,6 +247,8 @@ function AppPage() {
 		},
 	});
 
+	const logBoxRef = React.useRef<HTMLDivElement>(null);
+
 	const logs = useDeploymentLogs(
 		selectedDeploymentId,
 	);
@@ -265,6 +271,12 @@ function AppPage() {
 
 		createMutation.mutate(form);
 	};
+
+	React.useEffect(() => {
+		if (logBoxRef.current) {
+			logBoxRef.current.scrollTop = logBoxRef.current.scrollHeight;
+		}
+	}, [logs.logs]);
 
 	return (
 		<main className="layout">
@@ -476,7 +488,7 @@ function AppPage() {
 						? `(${selectedDeploymentId.slice(0, 8)})`
 						: ""}
 				</h2>
-				<div className="log-box">
+				<div className="log-box" ref={logBoxRef}>
 					{logs.isLoading && (
 						<p>Loading logs...</p>
 					)}

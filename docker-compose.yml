@@ -43,7 +43,7 @@ services:
             BUILDKIT_HOST: tcp://buildkit:1234
             DOCKER_BIN: /usr/bin/docker
             RAILPACK_VERBOSE: "1"
-            RAILPACK_BUILD_TIMEOUT_MS: "600000"
+            RAILPACK_BUILD_TIMEOUT_MS: "1200000"
         volumes:
             - ./data:/app/data
             - ./workspace:/app/workspace
@@ -83,7 +83,7 @@ services:
             interval: 5s
             timeout: 3s
             retries: 10
-            start_period: 10s
+            start_period: 30s
         networks:
             brim:
                 aliases:

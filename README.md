@@ -93,3 +93,15 @@ During the development and stabilization of the deployment orchestration pipelin
 
 3. **Compute Constraints & Isolation Profiles**:
    For multi-tenant security and stability, running user-uploaded arbitrary code should not happen in boundless environments. I would inject strict flag limits (`--memory=512m --cpus=0.5` and read-only filesystems where possible) into the orchestrator logic to prevent a single buggy deployment from crashing the orchestrator node.
+
+## Brimble Review
+
+I initially tried deploying a Next.js project that uses Turbopack, but the deployment failed. I had to reconfigure the build command, and even after that, the live URL returned a “Not Found” error.
+
+I also noticed that on redeploy requests, two new deployments are sometimes triggered instead of one with both of em in same state(in progress), which seems unintended.
+
+Runtime logs for deployed projects would be nice to have. Having access to logs would make debugging hosted project much easier for users. Additionally, session expiration feels too quick, which leads to a poor user experience.
+
+Later, I deployed two other projects, and the deployment went through successfully. Overall, the UI is clean and modern, and deployments worked well for the other projects I tested. I also like the “save for later” feature.
+
+Live example: [https://mind.brimble.app](https://mind.brimble.app)
